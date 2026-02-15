@@ -12,6 +12,11 @@ Example using the [cu-feetech](../../components/bridges/cu_feetech) bridge with 
 ## Setup
 
 - Connect one or two arms via USB–serial (`/dev/ttyACM0`, `/dev/ttyACM1`).
+- To determine the correct port, after plugging the USB-C cable, run the following command:
+
+  ```sh
+  dmesg | tail -n 20
+  ```
 - Edit `copperconfig.ron`: set `serial0_dev` (and `serial1_dev` for leader_follower) and `servo0`…`servo5` to match your bus.
 
 ## Calibration (optional)

@@ -41,7 +41,7 @@
             resources: {"serial": "hw.serial0"},
             config: {
                 "servo0": 1, "servo1": 2, "servo2": 3, "servo3": 4, "servo4": 5, "servo5": 6,
-                "units": "rad",
+                "units": "normalize",
                 "calibration_file": "calibration_leader.json",
             },
             channels: [Rx(id: "positions")],
@@ -53,7 +53,7 @@
             resources: {"serial": "hw.serial1"},
             config: {
                 "servo0": 1, "servo1": 2, "servo2": 3, "servo3": 4, "servo4": 5, "servo5": 6,
-                "units": "rad",
+                "units": "normalize",
                 "calibration_file": "calibration_follower.json",
             },
             channels: [Tx(id: "goal_positions"), Rx(id: "positions")],
@@ -65,6 +65,5 @@
         (src: "leader/positions", dst: "leader_follower_relay", msg: "cu_feetech::messages::JointPositions", missions: ["leader_follower"]),
         (src: "leader_follower_relay", dst: "follower/goal_positions", msg: "cu_feetech::messages::JointPositions", missions: ["leader_follower"]),
     ],
-
     runtime: (rate_target_hz: 30),
 )

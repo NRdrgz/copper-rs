@@ -14,13 +14,15 @@ use std::path::Path;
 /// Output unit for published positions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Units {
-    /// Raw 12-bit register values (0–4095).  No calibration needed.
+    /// Raw 16-bit register values (0–65535).  No calibration needed.
     #[default]
     Raw,
     /// Degrees relative to the calibration center (0 = center).
     Deg,
     /// Radians relative to the calibration center (0 = center).
     Rad,
+    /// Normalized range [-1, 1]: min → -1, center → 0, max → 1. Same scale for leader/follower.
+    Normalize,
 }
 
 impl Units {
@@ -30,6 +32,7 @@ impl Units {
             "raw" => Some(Self::Raw),
             "deg" => Some(Self::Deg),
             "rad" => Some(Self::Rad),
+            "normalize" | "norm" => Some(Self::Normalize),
             _ => None,
         }
     }
@@ -39,48 +42,57 @@ impl Units {
 // Conversion helpers
 // =========================================================================
 
-/// Full-circle scale: 4096 ticks = 360° for STS3215.
-const TICKS_PER_REV: f32 = 4096.0;
+/// Default ticks per revolution when not specified (e.g. STS3215 often uses 4096).
+/// Actual value is model-dependent; set via bridge config `ticks_per_rev`.
+pub const DEFAULT_TICKS_PER_REV: f32 = 4096.0;
 
 impl Units {
-    /// Convert a raw 12-bit tick to the output unit.
+    /// Convert a raw 16-bit tick to the output unit.
     ///
-    /// `center` is the calibration midpoint (in raw ticks) for this servo.
-    /// Ignored when `self == Raw`.  For `Deg` and `Rad` uses [`cu29::units`]
-    /// for type-safe angle conversion.
+    /// For `Raw`: `param` is ignored.
+    /// For `Deg`/`Rad`: `param` is `ticks_per_rev`.
+    /// For `Normalize`: `param` is half_range `(max - min) / 2`; result is in [-1, 1].
     #[inline]
-    pub fn from_raw(self, raw: u16, center: f32) -> f32 {
+    pub fn from_raw(self, raw: u16, center: f32, param: f32) -> f32 {
         match self {
             Self::Raw => raw as f32,
             Self::Deg => {
-                let deg = (raw as f32 - center) * 360.0 / TICKS_PER_REV;
+                let deg = (raw as f32 - center) * 360.0 / param;
                 Angle::new::<degree>(deg).get::<degree>()
             }
             Self::Rad => {
-                let rad = (raw as f32 - center) * core::f32::consts::TAU / TICKS_PER_REV;
+                let rad = (raw as f32 - center) * core::f32::consts::TAU / param;
                 Angle::new::<radian>(rad).get::<radian>()
+            }
+            Self::Normalize => {
+                if param <= 0.0 {
+                    0.0
+                } else {
+                    ((raw as f32 - center) / param).clamp(-1.0, 1.0)
+                }
             }
         }
     }
 
-    /// Convert an output-unit value back to a raw 12-bit tick.
+    /// Convert an output-unit value back to a raw 16-bit tick.
     ///
-    /// Result is clamped to `0..=4095`.  For `Deg` and `Rad`, the input
-    /// value is interpreted via [`cu29::units::Angle`].
+    /// For `Normalize`, `param` is half_range; value must be in [-1, 1].
+    /// Result is clamped to `0..=65535`.
     #[inline]
-    pub fn to_raw(self, value: f32, center: f32) -> u16 {
+    pub fn to_raw(self, value: f32, center: f32, param: f32) -> u16 {
         let raw = match self {
             Self::Raw => value,
             Self::Deg => {
                 let deg = Angle::new::<degree>(value).get::<degree>();
-                deg * TICKS_PER_REV / 360.0 + center
+                deg * param / 360.0 + center
             }
             Self::Rad => {
                 let rad = Angle::new::<radian>(value).get::<radian>();
-                rad * TICKS_PER_REV / core::f32::consts::TAU + center
+                rad * param / core::f32::consts::TAU + center
             }
+            Self::Normalize => center + value.clamp(-1.0, 1.0) * param,
         };
-        raw.round().clamp(0.0, 4095.0) as u16
+        raw.round().clamp(0.0, 65535.0) as u16
     }
 }
 
@@ -131,5 +143,14 @@ impl CalibrationData {
     /// Returns `None` if no calibration entry exists for that ID.
     pub fn center_for(&self, id: u8) -> Option<f32> {
         self.servos.iter().find(|s| s.id == id).map(|s| s.center())
+    }
+
+    /// Look up half the range `(max - min) / 2` for a servo by bus ID.
+    /// Used for the `normalize` unit ([-1, 1] over the calibrated range).
+    pub fn half_range_for(&self, id: u8) -> Option<f32> {
+        self.servos
+            .iter()
+            .find(|s| s.id == id)
+            .map(|s| (s.max as f32 - s.min as f32) / 2.0)
     }
 }

@@ -3,9 +3,10 @@
 //! Positions are published in the unit configured on the bridge
 //! (`"units"` key in `copperconfig.ron`):
 //!
-//! - `"raw"` (default) — raw 12-bit register values (0–4095).
+//! - `"raw"` (default) — raw 16-bit register values (0–65535).
 //! - `"deg"` — degrees relative to calibration center (0 = center).
 //! - `"rad"` — radians relative to calibration center (0 = center).
+//! - `"normalize"` — [-1, 1] over calibrated min..max (same scale for leader/follower).
 
 use cu29::prelude::*;
 

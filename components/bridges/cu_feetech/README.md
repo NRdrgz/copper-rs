@@ -7,7 +7,7 @@ Copper bridge for Feetech STS/SCS serial bus servos (e.g. STS3215 in SO-100/SO-1
 
 ## Config
 
-In `copperconfig.ron`: bind a serial resource and set servo IDs (`servo0`, `servo1`, …). Optionally set `units` to `"raw"` (default), `"deg"`, or `"rad"`; for deg/rad add `calibration_file` (path to JSON from `feetech-calibrate`).
+In `copperconfig.ron`: bind a serial resource and set servo IDs (`servo0`, `servo1`, …). Optionally set `units` to `"raw"` (default), `"deg"`, `"rad"`, or `"normalize"`; for deg/rad/normalize add `calibration_file` (path to JSON from `feetech-calibrate`). For deg/rad, `ticks_per_rev` (raw units per 360°) is model-dependent and optional (default 4096). Use `"normalize"` for leader–follower so both arms share the same [-1, 1] scale per joint.
 
 ## Calibration
 
