@@ -124,43 +124,4 @@ mod tasks {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // LeaderFollowerRelay — forwards leader positions to follower goal_positions
-    // -----------------------------------------------------------------------
-
-    #[derive(Default, Reflect)]
-    pub struct LeaderFollowerRelay;
-
-    impl Freezable for LeaderFollowerRelay {}
-
-    impl CuTask for LeaderFollowerRelay {
-        type Resources<'r> = ();
-        type Input<'m> = input_msg!(JointPositions);
-        type Output<'m> = output_msg!(JointPositions);
-
-        fn new(
-            _config: Option<&ComponentConfig>,
-            _resources: Self::Resources<'_>,
-        ) -> CuResult<Self>
-        where
-            Self: Sized,
-        {
-            Ok(Self)
-        }
-
-        fn process(
-            &mut self,
-            _clock: &RobotClock,
-            input: &Self::Input<'_>,
-            output: &mut Self::Output<'_>,
-        ) -> CuResult<()> {
-            if let Some(positions) = input.payload() {
-                output.set_payload(positions.clone());
-                output.tov = input.tov;
-            } else {
-                output.clear_payload();
-            }
-            Ok(())
-        }
-    }
 }

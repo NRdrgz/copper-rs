@@ -20,7 +20,6 @@
 
     tasks: [
         (id: "logger", type: "tasks::PositionLogger", missions: ["arm_publisher"]),
-        (id: "leader_follower_relay", type: "tasks::LeaderFollowerRelay", missions: ["leader_follower"]),
     ],
 
     bridges: [
@@ -62,8 +61,7 @@
 
     cnx: [
         (src: "feetech/positions", dst: "logger", msg: "cu_feetech::messages::JointPositions", missions: ["arm_publisher"]),
-        (src: "leader/positions", dst: "leader_follower_relay", msg: "cu_feetech::messages::JointPositions", missions: ["leader_follower"]),
-        (src: "leader_follower_relay", dst: "follower/goal_positions", msg: "cu_feetech::messages::JointPositions", missions: ["leader_follower"]),
+        (src: "leader/positions", dst: "follower/goal_positions", msg: "cu_feetech::messages::JointPositions", missions: ["leader_follower"]),
     ],
     runtime: (rate_target_hz: 30),
 )
