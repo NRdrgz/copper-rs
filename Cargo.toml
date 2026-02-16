@@ -169,7 +169,7 @@ serde = { version = "1.0", default-features = false, features = [
   "derive",
   "alloc",
 ] }
-serde_json = "1.0"
+serde_json = { version = "1.0", default-features = false }
 erased-serde = { version = "0.4", default-features = false, features = [
   "alloc",
 ] }
@@ -185,9 +185,11 @@ clap = { version = "4.5", default-features = false, features = [
 ] }
 
 # External proc macros
-proc-macro2 = { version = "1.0" }
-quote = "1.0"                                  # proc macros
-syn = { version = "2.0", features = ["full"] } # proc macros
+proc-macro2 = { version = "1.0", default-features = false }
+quote = { version = "1.0", default-features = false } # proc macros
+syn = { version = "2.0", default-features = false, features = [
+  "full",
+] } # proc macros
 
 # Unit of measure to be consistent across the project
 uom = { version = "0.38", default-features = false, features = [
@@ -208,7 +210,7 @@ bevy_reflect = { version = "0.18.0", default-features = false, features = [
 ] }
 
 # used across testing
-tempfile = "3.23"
+tempfile = { version = "3.23", default-features = false }
 
 spin = { version = "0.10" } # should be removed when std is on, but cargo is bad at negative features
 
@@ -227,13 +229,51 @@ heapless = { version = "0.9", default-features = false, features = ["serde"] }
 rayon = "1.11"
 
 # Realtime sanitizer (standalone)
-rtsan-standalone = "0.3.0"
+rtsan-standalone = { version = "0.3.0", default-features = false }
 
 # HashMap that is fast and has no std dependency
 hashbrown = { version = "0.16", features = ["serde"] }
 
+# Shared external dependencies of workspace members.
+anyhow = { version = "1.0", default-features = false }
+arrayvec = { version = "0.7", default-features = false }
+avian3d = { version = "0.5.0", default-features = false }
+bevy = { version = "0.18.0", default-features = false }
+buddy_system_allocator = { version = "0.12", default-features = false }
+bytemuck = "1.23.0"
+cached-path = { version = "0.10.0", default-features = false }
+cfg_aliases = "0.2.1"
+chrono = "0.4.41"
+circular-buffer = { version = "1.1.0", default-features = false }
+cortex-m = "0.7"
+cortex-m-rt = "0.7"
+ctrlc = "3.5"
+defmt = { version = "1.0", default-features = false }
+defmt-rtt = "1.1"
+embedded-alloc = { version = "0.7", default-features = false }
+gstreamer = { version = "0.24", default-features = false }
+image = { version = "0.25.6", default-features = false }
+libc = { version = "0.2", default-features = false }
+linux-embedded-hal = "0.4.0"
+log = { version = "0.4", default-features = false }
+minicbor-serde = { version = "0.6.2", default-features = false }
+nix = { version = "0.31", default-features = false }
+panic-probe = "1.0"
+petgraph = { version = "0.8", default-features = false }
+rp235x-hal = "0.4"
+rppal = { version = "0.22.1", default-features = false }
+serialport = { version = "4.8.1", default-features = false }
+simplelog = "0.12"
+socket2 = "0.6"
+stm32h7xx-hal = { version = "0.16.0", default-features = false }
+strfmt = "0.2"
+zenoh = { version = "1.7.0", default-features = false }
+
 [workspace.metadata.cargo-shear]
 ignored = ["cu-consolemon"]
+
+[workspace.metadata.dependency-audit]
+allow_divergent = ["embedded-hal", "embedded-io", "embedded-sdmmc"]
 
 [profile.screaming]
 inherits = "release"
