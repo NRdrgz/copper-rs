@@ -73,7 +73,10 @@ fn main() {
             }
         }
         other => {
-            eprintln!("Unknown mission: '{}'. Use 'arm_publisher' or 'leader_follower'.", other);
+            eprintln!(
+                "Unknown mission: '{}'. Use 'arm_publisher' or 'leader_follower'.",
+                other
+            );
             std::process::exit(1);
         }
     }
@@ -90,8 +93,8 @@ fn print_setup_help(e: &CuError) {
 // ===========================================================================
 
 mod tasks {
-    use cu29::prelude::*;
     use cu_feetech::messages::JointPositions;
+    use cu29::prelude::*;
 
     // -----------------------------------------------------------------------
     // PositionLogger — logs positions
@@ -106,10 +109,7 @@ mod tasks {
         type Resources<'r> = ();
         type Input<'m> = input_msg!(JointPositions);
 
-        fn new(
-            _config: Option<&ComponentConfig>,
-            _resources: Self::Resources<'_>,
-        ) -> CuResult<Self>
+        fn new(_config: Option<&ComponentConfig>, _resources: Self::Resources<'_>) -> CuResult<Self>
         where
             Self: Sized,
         {
@@ -123,5 +123,4 @@ mod tasks {
             Ok(())
         }
     }
-
 }

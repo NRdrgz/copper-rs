@@ -14,8 +14,8 @@
 use cu_feetech::calibration::{CalibrationData, ServoCalibration};
 use cu_linux_resources::LinuxSerialPort;
 use std::io::{self, Read, Write};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 // -- Minimal Feetech protocol (just enough to read positions) ---------------
 
@@ -77,12 +77,13 @@ fn main() {
     }
 
     let dev = &args[1];
-    let (id_args, output_path): (&[String], &str) = if args.len() > 3 && args.last().map(|s| s.ends_with(".json")).unwrap_or(false) {
-        let out = args.last().unwrap();
-        (&args[2..args.len() - 1], out.as_str())
-    } else {
-        (&args[2..], "calibration.json")
-    };
+    let (id_args, output_path): (&[String], &str) =
+        if args.len() > 3 && args.last().map(|s| s.ends_with(".json")).unwrap_or(false) {
+            let out = args.last().unwrap();
+            (&args[2..args.len() - 1], out.as_str())
+        } else {
+            (&args[2..], "calibration.json")
+        };
     let ids: Vec<u8> = id_args
         .iter()
         .map(|s| s.parse().expect("servo IDs must be numbers"))
@@ -93,8 +94,7 @@ fn main() {
     }
     let n = ids.len();
 
-    let mut port =
-        LinuxSerialPort::open(dev, 1_000_000, 10).expect("Failed to open serial port");
+    let mut port = LinuxSerialPort::open(dev, 1_000_000, 10).expect("Failed to open serial port");
 
     // Track min/max per servo.
     let mut mins = vec![u16::MAX; n];

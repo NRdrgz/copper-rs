@@ -284,9 +284,8 @@ impl FeetechBridge {
         // Verify checksum (covers id, length, and all of `remaining` except
         // the last byte which is the checksum itself).
         let received_checksum = *remaining.last().unwrap();
-        let expected_checksum = compute_checksum(
-            &[&[id, length as u8], &remaining[..remaining.len() - 1]].concat(),
-        );
+        let expected_checksum =
+            compute_checksum(&[&[id, length as u8], &remaining[..remaining.len() - 1]].concat());
         if received_checksum != expected_checksum {
             return Err(io::Error::other("Feetech: checksum mismatch"));
         }
@@ -310,14 +309,12 @@ impl FeetechBridge {
             .read_status_packet()
             .map_err(|e| CuError::new_with_cause("Feetech: ping read failed", e))?;
         if error != 0 {
-            return Err(format!("Feetech: servo {} returned error 0x{:02X}", resp_id, error).into());
+            return Err(
+                format!("Feetech: servo {} returned error 0x{:02X}", resp_id, error).into(),
+            );
         }
         if resp_id != id {
-            return Err(format!(
-                "Feetech: ping expected ID {} but got {}",
-                id, resp_id
-            )
-            .into());
+            return Err(format!("Feetech: ping expected ID {} but got {}", id, resp_id).into());
         }
         Ok(())
     }
@@ -436,11 +433,7 @@ impl FeetechBridge {
     fn param_for_slot(&self, i: usize) -> f32 {
         if self.units == Units::Normalize {
             let hr = self.half_ranges[i];
-            if hr > 0.0 {
-                hr
-            } else {
-                1.0
-            } // avoid div-by-zero
+            if hr > 0.0 { hr } else { 1.0 } // avoid div-by-zero
         } else {
             self.ticks_per_rev
         }
@@ -492,8 +485,7 @@ impl CuBridge for FeetechBridge {
     where
         Self: Sized,
     {
-        let cfg =
-            config.ok_or("FeetechBridge requires a config block with servo IDs")?;
+        let cfg = config.ok_or("FeetechBridge requires a config block with servo IDs")?;
 
         // Collect servo IDs from sequential keys: "servo0", "servo1", …
         // Stop at the first missing key (after servo0, which is mandatory).
@@ -586,7 +578,10 @@ impl CuBridge for FeetechBridge {
     fn start(&mut self, _clock: &RobotClock) -> CuResult<()> {
         if self.has_writers {
             self.enable_all_torque()?;
-            debug!("FeetechBridge: enabled torque on {} servos", self.num_servos);
+            debug!(
+                "FeetechBridge: enabled torque on {} servos",
+                self.num_servos
+            );
         } else {
             debug!(
                 "FeetechBridge: read-only mode, torque left disabled on {} servos",
@@ -647,7 +642,10 @@ impl CuBridge for FeetechBridge {
                     self.cached_positions[..self.num_servos as usize]
                         .iter()
                         .enumerate()
-                        .map(|(i, &raw)| self.units.from_raw(raw, self.centers[i], self.param_for_slot(i))),
+                        .map(|(i, &raw)| {
+                            self.units
+                                .from_raw(raw, self.centers[i], self.param_for_slot(i))
+                        }),
                 );
                 let pos_msg: &mut CuMsg<JointPositions> = msg.downcast_mut()?;
                 pos_msg.set_payload(payload);
@@ -665,7 +663,8 @@ impl CuBridge for FeetechBridge {
             if let Err(e) = self.set_torque(self.ids[i], false) {
                 debug!(
                     "FeetechBridge: failed to disable torque on servo {}: {}",
-                    self.ids[i], e.to_string()
+                    self.ids[i],
+                    e.to_string()
                 );
             }
         }
@@ -714,7 +713,7 @@ mod tests {
 
     #[test]
     fn units_deg_roundtrip() {
-        use crate::calibration::{Units, DEFAULT_TICKS_PER_REV};
+        use crate::calibration::{DEFAULT_TICKS_PER_REV, Units};
         let u = Units::Deg;
         let center = 2048.0;
         // Center should map to 0°.
@@ -725,7 +724,7 @@ mod tests {
 
     #[test]
     fn units_rad_roundtrip() {
-        use crate::calibration::{Units, DEFAULT_TICKS_PER_REV};
+        use crate::calibration::{DEFAULT_TICKS_PER_REV, Units};
         let u = Units::Rad;
         let center = 2048.0;
         let rad = u.from_raw(3072, center, DEFAULT_TICKS_PER_REV);

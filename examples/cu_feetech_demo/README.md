@@ -23,7 +23,7 @@ Example using the [cu-feetech](../../components/bridges/cu_feetech) bridge with 
 
 For **arm_publisher** with deg/rad: run the tool once, save as `calibration.json`, set `units` and `calibration_file` in the feetech bridge config.
 
-For **leader_follower**: calibrate each arm separately. Pass the output path as the last argument so you can name the file directly (config expects `calibration_leader.json` and `calibration_follower.json`). Positions are in **radians**.
+For **leader_follower**: calibrate each arm separately. Pass the output path as the last argument so you can name the file directly (config expects `calibration_leader.json` and `calibration_follower.json`). Positions are in **normalized**.
 
 ```sh
 cargo run -p cu-feetech --bin feetech-calibrate -- /dev/ttyACM0 1 2 3 4 5 6 calibration_leader.json
