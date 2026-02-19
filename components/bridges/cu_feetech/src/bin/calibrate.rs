@@ -124,7 +124,7 @@ fn main() {
         cycles += 1;
 
         // Print live update every ~30 reads.
-        if cycles % 30 == 0 {
+        if cycles.is_multiple_of(30) {
             print!("\r");
             for (i, &id) in ids.iter().enumerate() {
                 print!("  s{id}:[{:>4}–{:>4}]", mins[i], maxs[i]);

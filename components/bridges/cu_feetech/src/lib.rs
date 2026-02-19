@@ -406,9 +406,9 @@ impl FeetechBridge {
         let mut params = Vec::with_capacity(2 + n * 3);
         params.push(reg::GOAL_POSITION); // start address
         params.push(data_len_per_servo);
-        for i in 0..n {
+        for (i, val) in vals.iter().enumerate().take(n) {
             let param = self.param_for_slot(i);
-            let raw = self.units.to_raw(vals[i], self.centers[i], param);
+            let raw = self.units.to_raw(*val, self.centers[i], param);
             params.push(self.ids[i]); // servo ID
             params.push((raw & 0xFF) as u8); // position low byte
             params.push((raw >> 8) as u8); // position high byte
@@ -491,11 +491,11 @@ impl CuBridge for FeetechBridge {
         // Stop at the first missing key (after servo0, which is mandatory).
         let mut ids = [0u8; MAX_SERVOS];
         let mut num_servos: u8 = 0;
-        for i in 0..MAX_SERVOS {
+        for (i, id_slot) in ids.iter_mut().enumerate().take(MAX_SERVOS) {
             let key = format!("servo{}", i);
             match cfg.get::<u8>(&key)? {
                 Some(id) => {
-                    ids[i] = id;
+                    *id_slot = id;
                     num_servos = (i + 1) as u8;
                 }
                 None if i == 0 => {
@@ -510,7 +510,7 @@ impl CuBridge for FeetechBridge {
 
         // ---- Parse output units ----
         let units = match cfg.get::<String>("units")? {
-            Some(s) => Units::from_str(&s).ok_or_else(|| {
+            Some(s) => s.parse().map_err(|_| {
                 CuError::from(format!(
                     "FeetechBridge: unknown units \"{s}\". Use \"raw\", \"deg\", \"rad\", or \"normalize\"."
                 ))

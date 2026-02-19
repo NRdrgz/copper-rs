@@ -10,6 +10,7 @@ use cu29::units::si::angle::{degree, radian};
 use cu29::units::si::f32::Angle;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use std::str::FromStr;
 
 /// Output unit for published positions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -25,15 +26,17 @@ pub enum Units {
     Normalize,
 }
 
-impl Units {
-    /// Parse from a config string.  Returns `None` for unrecognised values.
-    pub fn from_str(s: &str) -> Option<Self> {
+impl FromStr for Units {
+    type Err = ();
+
+    /// Parse from a config string.  Returns `Err` for unrecognised values.
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "raw" => Some(Self::Raw),
-            "deg" => Some(Self::Deg),
-            "rad" => Some(Self::Rad),
-            "normalize" | "norm" => Some(Self::Normalize),
-            _ => None,
+            "raw" => Ok(Self::Raw),
+            "deg" => Ok(Self::Deg),
+            "rad" => Ok(Self::Rad),
+            "normalize" | "norm" => Ok(Self::Normalize),
+            _ => Err(()),
         }
     }
 }
