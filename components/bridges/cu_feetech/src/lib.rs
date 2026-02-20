@@ -61,6 +61,7 @@ use cu29::cubridge::{
 };
 use cu29::prelude::*;
 use cu29::resources;
+use heapless::Vec as HeaplessVec;
 use std::io::{self, Read, Write};
 
 // ===========================================================================
@@ -69,6 +70,16 @@ use std::io::{self, Read, Write};
 
 /// Every Feetech packet starts with two 0xFF bytes.
 const HEADER: [u8; 2] = [0xFF, 0xFF];
+
+/// Maximum size of a Feetech packet payload (params or response data).
+/// Sync-write with MAX_SERVOS (8) = 2 (start addr + len) + 8*3 (ID + 2 bytes data) = 26 bytes.
+/// Adding header (2) + ID (1) + length (1) + instruction (1) + checksum (1) = 32 bytes total.
+const MAX_PACKET_SIZE: usize = 32;
+
+/// Maximum size of a status packet response buffer.
+/// Length byte is u8 (max 255), but realistic responses are much smaller.
+/// Using 64 bytes should cover all practical cases while staying on the stack.
+const MAX_STATUS_PACKET_SIZE: usize = 64;
 
 /// Broadcast address — targets all servos on the bus.
 /// Used by sync-write so a single packet sets every servo's goal position.
@@ -215,7 +226,7 @@ pub struct FeetechBridge {
 
     /// Ticks per revolution (raw units per 360°) for deg/rad conversion. Model-dependent.
     #[reflect(ignore)]
-    ticks_per_rev: f32,
+    ticks_per_rev: u32,
 
     /// Per-servo half-range (max - min) / 2 for normalize unit. Only used when `units == Normalize`.
     #[reflect(ignore)]
@@ -241,16 +252,20 @@ impl FeetechBridge {
     /// where `length = len(params) + 2` (instruction + checksum).
     fn send_packet(&mut self, id: u8, instruction: u8, params: &[u8]) -> io::Result<()> {
         let length = (params.len() + 2) as u8;
-        let mut packet = Vec::with_capacity(6 + params.len());
-        packet.extend_from_slice(&HEADER);
-        packet.push(id);
-        packet.push(length);
-        packet.push(instruction);
-        packet.extend_from_slice(params);
+        let packet_size = 2 + 1 + 1 + 1 + params.len() + 1; // header + ID + length + instruction + params + checksum
+        if packet_size > MAX_PACKET_SIZE {
+            return Err(io::Error::other("Feetech: packet too large"));
+        }
+        let mut packet = [0u8; MAX_PACKET_SIZE];
+        packet[0..2].copy_from_slice(&HEADER);
+        packet[2] = id;
+        packet[3] = length;
+        packet[4] = instruction;
+        packet[5..5 + params.len()].copy_from_slice(params);
         // Checksum covers everything after the header (ID onward).
-        let checksum = compute_checksum(&packet[2..]);
-        packet.push(checksum);
-        self.port.write_all(&packet)?;
+        let checksum = compute_checksum(&packet[2..5 + params.len()]);
+        packet[5 + params.len()] = checksum;
+        self.port.write_all(&packet[..packet_size])?;
         self.port.flush()?;
         Ok(())
     }
@@ -263,7 +278,7 @@ impl FeetechBridge {
     /// ```
     ///
     /// Returns `(id, error_byte, data)` on success.
-    fn read_status_packet(&mut self) -> io::Result<(u8, u8, Vec<u8>)> {
+    fn read_status_packet(&mut self) -> io::Result<(u8, u8, HeaplessVec<u8, MAX_STATUS_PACKET_SIZE>)> {
         // Read the fixed-size portion: header (2) + id (1) + length (1).
         let mut header = [0u8; 4];
         self.port.read_exact(&mut header)?;
@@ -276,23 +291,34 @@ impl FeetechBridge {
         if length < 2 {
             return Err(io::Error::other("Feetech: response length too short"));
         }
+        if length > MAX_STATUS_PACKET_SIZE {
+            return Err(io::Error::other("Feetech: response packet too large"));
+        }
 
         // Read the variable-size portion: error + data + checksum.
-        let mut remaining = vec![0u8; length];
-        self.port.read_exact(&mut remaining)?;
+        let mut remaining = [0u8; MAX_STATUS_PACKET_SIZE];
+        self.port.read_exact(&mut remaining[..length])?;
 
         // Verify checksum (covers id, length, and all of `remaining` except
         // the last byte which is the checksum itself).
-        let received_checksum = *remaining.last().unwrap();
-        let expected_checksum =
-            compute_checksum(&[&[id, length as u8], &remaining[..remaining.len() - 1]].concat());
+        let received_checksum = remaining[length - 1];
+        // Checksum covers: [id, length, error, data...] (everything except checksum)
+        let mut checksum_sum: u8 = id;
+        checksum_sum = checksum_sum.wrapping_add(length as u8);
+        for &b in &remaining[..length - 1] {
+            checksum_sum = checksum_sum.wrapping_add(b);
+        }
+        let expected_checksum = !checksum_sum;
         if received_checksum != expected_checksum {
             return Err(io::Error::other("Feetech: checksum mismatch"));
         }
 
         let error_byte = remaining[0];
         // Data sits between the error byte and the checksum.
-        let data = remaining[1..remaining.len() - 1].to_vec();
+        let data_len = length - 2; // length - error byte - checksum
+        let mut data = HeaplessVec::new();
+        data.extend_from_slice(&remaining[1..1 + data_len])
+            .map_err(|_| io::Error::other("Feetech: failed to create data vector"))?;
         Ok((id, error_byte, data))
     }
 
@@ -320,7 +346,7 @@ impl FeetechBridge {
     }
 
     /// Read `count` bytes starting at `address` from a single servo.
-    fn read_register(&mut self, id: u8, address: u8, count: u8) -> io::Result<Vec<u8>> {
+    fn read_register(&mut self, id: u8, address: u8, count: u8) -> io::Result<HeaplessVec<u8, MAX_STATUS_PACKET_SIZE>> {
         // READ instruction params: [start_address, byte_count].
         self.send_packet(id, instr::READ, &[address, count])?;
         let (_id, _error, data) = self.read_status_packet()?;
@@ -331,10 +357,14 @@ impl FeetechBridge {
     #[allow(dead_code)]
     fn write_register(&mut self, id: u8, address: u8, data: &[u8]) -> io::Result<()> {
         // WRITE instruction params: [start_address, data…].
-        let mut params = Vec::with_capacity(1 + data.len());
-        params.push(address);
-        params.extend_from_slice(data);
-        self.send_packet(id, instr::WRITE, &params)?;
+        // Max params size: address (1) + data (typically small, max ~20 bytes for multi-register writes)
+        if 1 + data.len() > MAX_PACKET_SIZE - 5 {
+            return Err(io::Error::other("Feetech: write data too large"));
+        }
+        let mut params = [0u8; MAX_PACKET_SIZE - 5];
+        params[0] = address;
+        params[1..1 + data.len()].copy_from_slice(data);
+        self.send_packet(id, instr::WRITE, &params[..1 + data.len()])?;
         // Every non-broadcast write returns a status acknowledgment.
         let _ = self.read_status_packet()?;
         Ok(())
@@ -403,18 +433,25 @@ impl FeetechBridge {
         }
 
         let data_len_per_servo: u8 = 2; // 2 bytes for GOAL_POSITION
-        let mut params = Vec::with_capacity(2 + n * 3);
-        params.push(reg::GOAL_POSITION); // start address
-        params.push(data_len_per_servo);
+        // Max params: 2 (start addr + len) + MAX_SERVOS*3 (ID + 2 bytes data) = 26 bytes
+        let params_size = 2 + n * 3;
+        if params_size > MAX_PACKET_SIZE - 5 {
+            return Err(CuError::from("Feetech: sync-write params too large"));
+        }
+        let mut params = [0u8; MAX_PACKET_SIZE - 5];
+        params[0] = reg::GOAL_POSITION; // start address
+        params[1] = data_len_per_servo;
+        let mut offset = 2;
         for (i, val) in vals.iter().enumerate().take(n) {
             let param = self.param_for_slot(i);
             let raw = self.units.to_raw(*val, self.centers[i], param);
-            params.push(self.ids[i]); // servo ID
-            params.push((raw & 0xFF) as u8); // position low byte
-            params.push((raw >> 8) as u8); // position high byte
+            params[offset] = self.ids[i]; // servo ID
+            params[offset + 1] = (raw & 0xFF) as u8; // position low byte
+            params[offset + 2] = (raw >> 8) as u8; // position high byte
+            offset += 3;
         }
 
-        self.send_packet(BROADCAST_ID, instr::SYNC_WRITE, &params)
+        self.send_packet(BROADCAST_ID, instr::SYNC_WRITE, &params[..params_size])
             .map_err(|e| CuError::new_with_cause("Feetech: sync-write failed", e))?;
         Ok(())
     }
@@ -435,7 +472,7 @@ impl FeetechBridge {
             let hr = self.half_ranges[i];
             if hr > 0.0 { hr } else { 1.0 } // avoid div-by-zero
         } else {
-            self.ticks_per_rev
+            self.ticks_per_rev as f32
         }
     }
 
@@ -473,7 +510,7 @@ impl CuBridge for FeetechBridge {
     /// | …                  | …      | Up to `servo7`                                |
     /// | `units`            | string | `"raw"` (default), `"deg"`, `"rad"`, or `"normalize"` |
     /// | `calibration_file` | string | Path to calibration JSON (required for deg/rad/normalize) |
-    /// | `ticks_per_rev`    | number | Raw units per 360° (model-dependent; default 4096) |
+    /// | `ticks_per_rev`    | integer | Raw units per 360° (model-dependent; default 4096) |
     ///
     /// At least `servo0` must be present.
     fn new(
@@ -550,7 +587,7 @@ impl CuBridge for FeetechBridge {
         }
 
         // ---- Ticks per revolution (model-dependent; used for deg/rad) ----
-        let ticks_per_rev = cfg.get::<f64>("ticks_per_rev")?.unwrap_or(4096.0) as f32;
+        let ticks_per_rev = cfg.get::<u32>("ticks_per_rev")?.unwrap_or(4096);
 
         let port = resources.serial.0;
 
@@ -717,9 +754,9 @@ mod tests {
         let u = Units::Deg;
         let center = 2048.0;
         // Center should map to 0°.
-        assert!((u.from_raw(2048, center, DEFAULT_TICKS_PER_REV)).abs() < 1e-6);
+        assert!((u.from_raw(2048, center, DEFAULT_TICKS_PER_REV as f32)).abs() < 1e-6);
         // Converting 0° back should give the center tick.
-        assert_eq!(u.to_raw(0.0, center, DEFAULT_TICKS_PER_REV), 2048);
+        assert_eq!(u.to_raw(0.0, center, DEFAULT_TICKS_PER_REV as f32), 2048);
     }
 
     #[test]
@@ -727,8 +764,8 @@ mod tests {
         use crate::calibration::{DEFAULT_TICKS_PER_REV, Units};
         let u = Units::Rad;
         let center = 2048.0;
-        let rad = u.from_raw(3072, center, DEFAULT_TICKS_PER_REV);
-        let back = u.to_raw(rad, center, DEFAULT_TICKS_PER_REV);
+        let rad = u.from_raw(3072, center, DEFAULT_TICKS_PER_REV as f32);
+        let back = u.to_raw(rad, center, DEFAULT_TICKS_PER_REV as f32);
         assert_eq!(back, 3072);
     }
 

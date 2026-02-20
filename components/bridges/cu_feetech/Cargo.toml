@@ -20,3 +20,4 @@ cu29 = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 cu-linux-resources = { workspace = true }
+heapless = { workspace = true }

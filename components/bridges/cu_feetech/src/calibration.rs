@@ -47,7 +47,7 @@ impl FromStr for Units {
 
 /// Default ticks per revolution when not specified (e.g. STS3215 often uses 4096).
 /// Actual value is model-dependent; set via bridge config `ticks_per_rev`.
-pub const DEFAULT_TICKS_PER_REV: f32 = 4096.0;
+pub const DEFAULT_TICKS_PER_REV: u32 = 4096;
 
 impl Units {
     /// Convert a raw 16-bit tick to the output unit.
