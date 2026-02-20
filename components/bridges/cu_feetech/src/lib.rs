@@ -278,7 +278,9 @@ impl FeetechBridge {
     /// ```
     ///
     /// Returns `(id, error_byte, data)` on success.
-    fn read_status_packet(&mut self) -> io::Result<(u8, u8, HeaplessVec<u8, MAX_STATUS_PACKET_SIZE>)> {
+    fn read_status_packet(
+        &mut self,
+    ) -> io::Result<(u8, u8, HeaplessVec<u8, MAX_STATUS_PACKET_SIZE>)> {
         // Read the fixed-size portion: header (2) + id (1) + length (1).
         let mut header = [0u8; 4];
         self.port.read_exact(&mut header)?;
@@ -346,7 +348,12 @@ impl FeetechBridge {
     }
 
     /// Read `count` bytes starting at `address` from a single servo.
-    fn read_register(&mut self, id: u8, address: u8, count: u8) -> io::Result<HeaplessVec<u8, MAX_STATUS_PACKET_SIZE>> {
+    fn read_register(
+        &mut self,
+        id: u8,
+        address: u8,
+        count: u8,
+    ) -> io::Result<HeaplessVec<u8, MAX_STATUS_PACKET_SIZE>> {
         // READ instruction params: [start_address, byte_count].
         self.send_packet(id, instr::READ, &[address, count])?;
         let (_id, _error, data) = self.read_status_packet()?;
