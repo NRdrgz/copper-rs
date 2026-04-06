@@ -107,14 +107,16 @@ bevy = { workspace = true, default-features = false, features = [
 default = ["logreader", "sim"]
 # generates an executable to read the logs
 logreader = ["dep:cu29-export"]
-# dependencies to build to matrix for copper
+sim_core = ["cu29/sysclock-perf"]
+# dependencies to run the Bevy-based balancebot sim
 sim = [
+  "sim_core",
   "dep:bevy",
   "dep:bevy_anti_alias",
   "dep:avian3d",
   "dep:cached-path",
-  "cu29/sysclock-perf",
-] # dependencies to run the Bevy-based balancebot sim
+]
+sim-debug = ["logreader", "cu29/reflect", "cu29/remote-debug"]
 bevymon = ["sim", "dep:cu-bevymon"]
 
 [[bin]]
@@ -139,4 +141,4 @@ required-features = ["sim"]
 [[bin]]
 name = "balancebot-resim"
 path = "src/resim.rs"
-required-features = ["sim", "logreader"]
+required-features = ["sim-debug"]
