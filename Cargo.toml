@@ -22,6 +22,7 @@ members = [
   "components/bridges/cu_iceoryx2_bridge",
   "components/bridges/cu_zenoh_bridge",
   "components/bridges/cu_ros2_bridge",
+  "components/codecs/cu_png_codec",
   "components/libs/cu_msp_lib",
   "components/libs/cu_transform",
   "core/cu29_units",
@@ -172,6 +173,7 @@ cu29-unifiedlog = { path = "core/cu29_unifiedlog", default-features = false, fea
 cu29-units = { path = "core/cu29_units", version = "0.15.0" }
 cu29-value = { path = "core/cu29_value", default-features = false, version = "0.15.0" }
 cu-linux-resources = { path = "components/res/cu_linux_resources", version = "0.15.0" }
+cu-png-codec = { path = "components/codecs/cu_png_codec", version = "0.15.0" }
 
 # Payload definitions
 cu-sensor-payloads = { path = "components/payloads/cu_sensor_payloads", version = "0.15.0" }
@@ -283,6 +285,7 @@ defmt-rtt = "1.1"
 embedded-alloc = { version = "0.7", default-features = false }
 gstreamer = { version = "0.25", default-features = false }
 image = { version = "0.25.6", default-features = false }
+png = "0.18.1"
 libc = { version = "0.2", default-features = false }
 linux-embedded-hal = "0.4.0"
 log = { version = "0.4", default-features = false }
