@@ -469,4 +469,40 @@ mod tests {
         assert!(!format.is_valid());
         assert_eq!(format.packed_row_bytes(), Some(12));
     }
+
+    #[test]
+    fn byte_size_for_packed_formats_is_stride_times_height() {
+        let format = CuImageBufferFormat {
+            width: 4,
+            height: 3,
+            stride: 16,
+            pixel_format: *b"BGRA",
+        };
+
+        assert_eq!(format.byte_size(), 48);
+    }
+
+    #[test]
+    fn byte_size_for_nv12_includes_uv_plane() {
+        let format = CuImageBufferFormat {
+            width: 1280,
+            height: 720,
+            stride: 1280,
+            pixel_format: *b"NV12",
+        };
+
+        assert_eq!(format.byte_size(), 1_382_400);
+    }
+
+    #[test]
+    fn byte_size_for_i420_includes_chroma_planes() {
+        let format = CuImageBufferFormat {
+            width: 640,
+            height: 480,
+            stride: 640,
+            pixel_format: *b"I420",
+        };
+
+        assert_eq!(format.byte_size(), 460_800);
+    }
 }
