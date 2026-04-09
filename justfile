@@ -218,7 +218,7 @@ rtsan-smoke pkg="cu-caterpillar" bin="cu-caterpillar" args="" options="halt_on_e
 	RTSAN_ENABLE=1 RTSAN_OPTIONS="{{options}}" \
 		cargo run --profile screaming -p "{{pkg}}" --features rtsan --bin "{{bin}}" -- {{args}}
 
-# Project-specific helpers now live in per-directory justfiles under examples/, components/, and support/.
+# Project-specific helpers now live in per-directory justfiles under examples/, components/, support/, and catalog/.
 
 # Build and open the generated wiki + API docs locally.
 docs:
