@@ -2,13 +2,13 @@ use cu29::prelude::*;
 use cu29_derive::copper_runtime;
 
 #[derive(Reflect)]
-struct BackgroundSrc;
+struct SingleSource;
 
-impl Freezable for BackgroundSrc {}
+impl Freezable for SingleSource {}
 
-impl CuSrcTask for BackgroundSrc {
+impl CuSrcTask for SingleSource {
     type Resources<'r> = ();
-    type Output<'m> = output_msg!(u32);
+    type Output<'m> = output_msg!(i32);
 
     fn new(_config: Option<&ComponentConfig>, _resources: Self::Resources<'_>) -> CuResult<Self> {
         Ok(Self)
@@ -20,7 +20,11 @@ impl CuSrcTask for BackgroundSrc {
     }
 }
 
-#[copper_runtime(config = "config/background_source_valid.ron")]
+#[copper_runtime(
+    config = "config/explicit_task_kind_source_no_outputs_valid.ron",
+    sim_mode = true,
+    ignore_resources = true
+)]
 struct App {}
 
 fn main() {}

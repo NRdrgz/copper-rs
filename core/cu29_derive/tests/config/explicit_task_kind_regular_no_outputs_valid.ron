@@ -2,24 +2,20 @@
     tasks: [
         (
             id: "src",
-            type: "Source",
+            type: "SingleSource",
             run_in_sim: true,
         ),
         (
-            id: "proc",
-            type: "Proc",
+            id: "regular",
+            type: "PassthroughTask",
+            kind: task,
             run_in_sim: true,
         ),
     ],
     cnx: [
         (
             src: "src",
-            dst: "proc",
-            msg: "i32",
-        ),
-        (
-            src: "proc",
-            dst: "__nc__",
+            dst: "regular",
             msg: "i32",
         ),
     ],

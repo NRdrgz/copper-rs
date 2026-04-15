@@ -2,11 +2,11 @@ use cu29::prelude::*;
 use cu29_derive::copper_runtime;
 
 #[derive(Reflect)]
-struct Source;
+struct IntSource;
 
-impl Freezable for Source {}
+impl Freezable for IntSource {}
 
-impl CuSrcTask for Source {
+impl CuSrcTask for IntSource {
     type Resources<'r> = ();
     type Output<'m> = output_msg!(i32);
 
@@ -15,20 +15,20 @@ impl CuSrcTask for Source {
     }
 
     fn process(&mut self, _ctx: &CuContext, output: &mut Self::Output<'_>) -> CuResult<()> {
-        output.set_payload(1);
+        output.set_payload(7);
         Ok(())
     }
 }
 
 #[derive(Reflect)]
-struct Proc;
+struct NcOnlyRegular;
 
-impl Freezable for Proc {}
+impl Freezable for NcOnlyRegular {}
 
-impl CuTask for Proc {
+impl CuTask for NcOnlyRegular {
     type Resources<'r> = ();
     type Input<'m> = input_msg!(i32);
-    type Output<'m> = output_msg!(i32);
+    type Output<'m> = output_msg!(bool);
 
     fn new(_config: Option<&ComponentConfig>, _resources: Self::Resources<'_>) -> CuResult<Self> {
         Ok(Self)
@@ -37,20 +37,19 @@ impl CuTask for Proc {
     fn process(
         &mut self,
         _ctx: &CuContext,
-        input: &Self::Input<'_>,
+        _input: &Self::Input<'_>,
         output: &mut Self::Output<'_>,
     ) -> CuResult<()> {
-        if let Some(value) = input.payload() {
-            output.set_payload(*value);
-        }
+        output.set_payload(true);
         Ok(())
     }
 }
 
 #[copper_runtime(
-    config = "config/ignore_resources_sim_mode_valid.ron",
+    config = "config/explicit_task_kind_nc_only_regular_valid.ron",
     sim_mode = true,
     ignore_resources = true
 )]
 struct App {}
+
 fn main() {}

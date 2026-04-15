@@ -2,25 +2,27 @@
     tasks: [
         (
             id: "src",
-            type: "Source",
+            type: "IntSource",
+            kind: source,
             run_in_sim: true,
         ),
         (
-            id: "proc",
-            type: "Proc",
+            id: "regular",
+            type: "NcOnlyRegular",
+            kind: task,
             run_in_sim: true,
         ),
     ],
     cnx: [
         (
             src: "src",
-            dst: "proc",
+            dst: "regular",
             msg: "i32",
         ),
         (
-            src: "proc",
+            src: "regular",
             dst: "__nc__",
-            msg: "i32",
+            msg: "bool",
         ),
     ],
 )

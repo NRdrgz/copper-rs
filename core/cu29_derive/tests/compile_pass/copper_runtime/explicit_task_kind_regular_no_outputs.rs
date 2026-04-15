@@ -2,11 +2,11 @@ use cu29::prelude::*;
 use cu29_derive::copper_runtime;
 
 #[derive(Reflect)]
-struct Source;
+struct SingleSource;
 
-impl Freezable for Source {}
+impl Freezable for SingleSource {}
 
-impl CuSrcTask for Source {
+impl CuSrcTask for SingleSource {
     type Resources<'r> = ();
     type Output<'m> = output_msg!(i32);
 
@@ -15,17 +15,17 @@ impl CuSrcTask for Source {
     }
 
     fn process(&mut self, _ctx: &CuContext, output: &mut Self::Output<'_>) -> CuResult<()> {
-        output.set_payload(1);
+        output.set_payload(7);
         Ok(())
     }
 }
 
 #[derive(Reflect)]
-struct Proc;
+struct PassthroughTask;
 
-impl Freezable for Proc {}
+impl Freezable for PassthroughTask {}
 
-impl CuTask for Proc {
+impl CuTask for PassthroughTask {
     type Resources<'r> = ();
     type Input<'m> = input_msg!(i32);
     type Output<'m> = output_msg!(i32);
@@ -40,17 +40,16 @@ impl CuTask for Proc {
         input: &Self::Input<'_>,
         output: &mut Self::Output<'_>,
     ) -> CuResult<()> {
-        if let Some(value) = input.payload() {
-            output.set_payload(*value);
-        }
+        output.set_payload(input.payload().copied().unwrap_or_default());
         Ok(())
     }
 }
 
 #[copper_runtime(
-    config = "config/ignore_resources_sim_mode_valid.ron",
+    config = "config/explicit_task_kind_regular_no_outputs_valid.ron",
     sim_mode = true,
     ignore_resources = true
 )]
 struct App {}
+
 fn main() {}
