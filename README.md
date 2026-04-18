@@ -92,7 +92,7 @@ Want to see more Copper in action? Watch the [community showcase video](https://
 - Task automation: [Task Automation with just](https://copper-project.github.io/copper-rs/Task-Automation-with-Just)
 - Supported platforms: [Supported Platforms](https://copper-project.github.io/copper-rs/Supported-Platforms)
 - Bare-metal development: [Baremetal Development](https://copper-project.github.io/copper-rs/Baremetal-Development)
-- Available components: [Available Components](https://copper-project.github.io/copper-rs/Available-Components)
+- Available components: [Available Components](https://cdn.copper-robotics.com/catalog/index.html)
 - FAQ: [FAQ](https://copper-project.github.io/copper-rs/FAQ)
 - Release notes: [Copper Release Notes](https://copper-project.github.io/copper-rs/Copper-Release-Notes)
 - Roadmap: [Roadmap](https://copper-project.github.io/copper-rs/Roadmap)
