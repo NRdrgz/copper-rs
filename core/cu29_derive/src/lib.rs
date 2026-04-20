@@ -213,7 +213,6 @@ pub fn gen_cumsgs(config_path_lit: TokenStream) -> TokenStream {
         use cu29::prelude::ErasedCuStampedData;
         use cu29::prelude::ErasedCuStampedDataSet;
         use cu29::prelude::MatchingTasks;
-        use cu29::prelude::Serialize;
         use cu29::prelude::CuMsg;
         use cu29::prelude::CuMsgMetadata;
         use cu29::prelude::CuListZeroedInit;
@@ -3422,7 +3421,7 @@ pub fn copper_runtime(args: TokenStream, input: TokenStream) -> TokenStream {
                     .rate_target_hz
                     .map(|rate| cu29::curuntime::LoopRateLimiter::from_rate_target_hz(
                         rate,
-                        &self.copper_runtime.clock,
+                        self.copper_runtime.clock_ref(),
                     ))
                     .transpose()?;
                 loop  {
@@ -3447,7 +3446,7 @@ pub fn copper_runtime(args: TokenStream, input: TokenStream) -> TokenStream {
                     };
 
                     if let Some(rate_limiter) = rate_limiter.as_mut() {
-                        rate_limiter.limit(&self.copper_runtime.clock);
+                        rate_limiter.limit(self.copper_runtime.clock_ref());
                     }
 
                     if STOP_FLAG.load(Ordering::SeqCst) || result.is_err() {
@@ -3463,13 +3462,13 @@ pub fn copper_runtime(args: TokenStream, input: TokenStream) -> TokenStream {
                     .rate_target_hz
                     .map(|rate| cu29::curuntime::LoopRateLimiter::from_rate_target_hz(
                         rate,
-                        &self.copper_runtime.clock,
+                        self.copper_runtime.clock_ref(),
                     ))
                     .transpose()?;
                 loop  {
                     let result = <Self as #app_trait<S, L>>::run_one_iteration(self, #sim_callback_arg);
                     if let Some(rate_limiter) = rate_limiter.as_mut() {
-                        rate_limiter.limit(&self.copper_runtime.clock);
+                        rate_limiter.limit(self.copper_runtime.clock_ref());
                     }
 
                     if STOP_FLAG.load(Ordering::SeqCst) || result.is_err() {
@@ -3492,7 +3491,8 @@ pub fn copper_runtime(args: TokenStream, input: TokenStream) -> TokenStream {
                     #mission_mod::assert_parallel_rt_send_bounds();
 
                     let runtime = &mut self.copper_runtime;
-                    let clock = &runtime.clock;
+                    let clock_handle = runtime.clock();
+                    let clock = &clock_handle;
                     let instance_id = runtime.instance_id();
                     let subsystem_code = runtime.subsystem_code();
                     let execution_probe = runtime.execution_probe.as_ref();
@@ -3840,7 +3840,8 @@ pub fn copper_runtime(args: TokenStream, input: TokenStream) -> TokenStream {
 
                 // Pre-explode the runtime to avoid complexity with partial borrowing in the generated code.
                 let runtime = &mut self.copper_runtime;
-                let clock = &runtime.clock;
+                let clock_handle = runtime.clock();
+                let clock = &clock_handle;
                 let instance_id = runtime.instance_id();
                 let subsystem_code = runtime.subsystem_code();
                 let execution_probe = &runtime.execution_probe;
@@ -3914,7 +3915,8 @@ pub fn copper_runtime(args: TokenStream, input: TokenStream) -> TokenStream {
 
             fn restore_keyframe(&mut self, keyframe: &KeyFrame) -> CuResult<()> {
                 let runtime = &mut self.copper_runtime;
-                let clock = &runtime.clock;
+                let clock_handle = runtime.clock();
+                let clock = &clock_handle;
                 let tasks = &mut runtime.tasks;
                 let __cu_bridges = &mut runtime.bridges;
                 let config = cu29::bincode::config::standard();
@@ -3931,7 +3933,7 @@ pub fn copper_runtime(args: TokenStream, input: TokenStream) -> TokenStream {
                 });
                 let lifecycle_clid = self.copper_runtime.copperlists_manager.last_cl_id();
                 let mut ctx = cu29::context::CuContext::from_runtime_metadata(
-                    self.copper_runtime.clock.clone(),
+                    self.copper_runtime.clock(),
                     lifecycle_clid,
                     self.copper_runtime.instance_id(),
                     self.copper_runtime.subsystem_code(),
@@ -3946,7 +3948,7 @@ pub fn copper_runtime(args: TokenStream, input: TokenStream) -> TokenStream {
             #stop_all_tasks {
                 let lifecycle_clid = self.copper_runtime.copperlists_manager.last_cl_id();
                 let mut ctx = cu29::context::CuContext::from_runtime_metadata(
-                    self.copper_runtime.clock.clone(),
+                    self.copper_runtime.clock(),
                     lifecycle_clid,
                     self.copper_runtime.instance_id(),
                     self.copper_runtime.subsystem_code(),
@@ -4244,7 +4246,7 @@ pub fn copper_runtime(args: TokenStream, input: TokenStream) -> TokenStream {
                     &mut self,
                     event: RuntimeLifecycleEvent,
                 ) -> CuResult<()> {
-                    let timestamp = self.copper_runtime.clock.now();
+                    let timestamp = self.copper_runtime.clock_ref().now();
                     let Some(stream) = self.runtime_lifecycle_stream.as_mut() else {
                         return Err(CuError::from("Runtime lifecycle stream is not initialized"));
                     };
@@ -5484,7 +5486,8 @@ fn extract_output_packs(runtime_plan: &CuExecutionLoop) -> Vec<OutputPack> {
         .steps
         .iter()
         .filter_map(|unit| match unit {
-            CuExecutionUnit::Step(step) if let Some(output_pack) = &step.output_msg_pack => {
+            CuExecutionUnit::Step(step) => {
+                let output_pack = step.output_msg_pack.as_ref()?;
                 let msg_types: Vec<Type> = output_pack
                     .msg_types
                     .iter()
@@ -5504,7 +5507,6 @@ fn extract_output_packs(runtime_plan: &CuExecutionLoop) -> Vec<OutputPack> {
                     },
                 ))
             }
-            CuExecutionUnit::Step(_) => None,
             CuExecutionUnit::Loop(_) => todo!("Needs to be implemented"),
         })
         .collect();
@@ -5862,12 +5864,12 @@ fn build_culist_tuple_serialize(slot_types: &[Type]) -> ItemImpl {
         .collect();
 
     parse_quote! {
-        impl Serialize for CuStampedDataSet {
+        impl cu29::serde::ser::Serialize for CuStampedDataSet {
             fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
             where
-                S: serde::Serializer,
+                S: cu29::serde::Serializer,
             {
-                use serde::ser::SerializeTuple;
+                use cu29::serde::ser::SerializeTuple;
                 let mut tuple = serializer.serialize_tuple(#tuple_len)?;
                 #(tuple.serialize_element(#serialize_fields)?;)*
                 tuple.end()
