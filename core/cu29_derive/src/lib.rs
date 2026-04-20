@@ -1,6 +1,6 @@
 use proc_macro::TokenStream;
 use quote::{ToTokens, format_ident, quote};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs::read_to_string;
 use std::path::Path;
 use std::process::Command;
@@ -1257,7 +1257,11 @@ pub fn copper_runtime(args: TokenStream, input: TokenStream) -> TokenStream {
         }
     };
 
-    let all_missions = copper_config.graphs.get_all_missions_graphs();
+    let all_missions = sorted_mission_graphs(&copper_config);
+    let task_input_layouts = match collect_task_input_layouts(&all_missions) {
+        Ok(layouts) => layouts,
+        Err(e) => return return_error(e.to_string()),
+    };
     let mut all_missions_tokens = Vec::<proc_macro2::TokenStream>::new();
     for (mission, graph) in &all_missions {
         let git_commit_tokens = git_commit_tokens.clone();
@@ -2616,6 +2620,8 @@ pub fn copper_runtime(args: TokenStream, input: TokenStream) -> TokenStream {
                             &task_specs,
                             StepGenerationContext::new(
                                 &output_pack_sizes,
+                                &task_input_layouts,
+                                mission.as_str(),
                                 sim_mode,
                                 &mission_mod,
                                 ParallelLifecyclePlacement::default(),
@@ -2637,6 +2643,8 @@ pub fn copper_runtime(args: TokenStream, input: TokenStream) -> TokenStream {
                                 *channel_index,
                                 StepGenerationContext::new(
                                     &output_pack_sizes,
+                                    &task_input_layouts,
+                                    mission.as_str(),
                                     sim_mode,
                                     &mission_mod,
                                     ParallelLifecyclePlacement::default(),
@@ -2660,6 +2668,8 @@ pub fn copper_runtime(args: TokenStream, input: TokenStream) -> TokenStream {
                                 *channel_index,
                                 StepGenerationContext::new(
                                     &output_pack_sizes,
+                                    &task_input_layouts,
+                                    mission.as_str(),
                                     sim_mode,
                                     &mission_mod,
                                     ParallelLifecyclePlacement::default(),
@@ -2708,6 +2718,8 @@ pub fn copper_runtime(args: TokenStream, input: TokenStream) -> TokenStream {
                                     &task_specs,
                                     StepGenerationContext::new(
                                         &output_pack_sizes,
+                                        &task_input_layouts,
+                                        mission.as_str(),
                                         false,
                                         &mission_mod,
                                         parallel_lifecycle_placements
@@ -2733,6 +2745,8 @@ pub fn copper_runtime(args: TokenStream, input: TokenStream) -> TokenStream {
                                     *channel_index,
                                     StepGenerationContext::new(
                                         &output_pack_sizes,
+                                        &task_input_layouts,
+                                        mission.as_str(),
                                         false,
                                         &mission_mod,
                                         parallel_lifecycle_placements
@@ -2759,6 +2773,8 @@ pub fn copper_runtime(args: TokenStream, input: TokenStream) -> TokenStream {
                                     *channel_index,
                                     StepGenerationContext::new(
                                         &output_pack_sizes,
+                                        &task_input_layouts,
+                                        mission.as_str(),
                                         false,
                                         &mission_mod,
                                         parallel_lifecycle_placements
@@ -5016,7 +5032,10 @@ pub fn copper_runtime(args: TokenStream, input: TokenStream) -> TokenStream {
         all_missions_tokens.push(mission_mod_tokens);
     }
 
-    let default_application_tokens = if all_missions.contains_key("default") {
+    let default_application_tokens = if all_missions
+        .iter()
+        .any(|(mission_name, _)| mission_name == "default")
+    {
         let default_builder = quote! {
             #[allow(unused_imports)]
             use default::#builder_name;
@@ -5686,6 +5705,501 @@ fn collect_output_pack_sizes(runtime_plan: &CuExecutionLoop) -> Vec<usize> {
 
     sizes.sort_by_key(|(index, _)| *index);
     sizes.into_iter().map(|(_, size)| size).collect()
+}
+
+fn sorted_mission_graphs(copper_config: &CuConfig) -> Vec<(String, CuGraph)> {
+    let mut all_missions: Vec<_> = copper_config
+        .graphs
+        .get_all_missions_graphs()
+        .into_iter()
+        .collect();
+    all_missions.sort_by(|(left, _), (right, _)| left.cmp(right));
+    all_missions
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CanonicalTaskInputSlot {
+    msg_type: String,
+    connection_orders: BTreeSet<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MissionTaskInput {
+    msg_type: String,
+    connection_order: usize,
+}
+
+#[derive(Debug, Clone)]
+struct TaskInputLayout {
+    slots: Vec<CanonicalTaskInputSlot>,
+    mission_slot_mappings: HashMap<String, Vec<Option<usize>>>,
+}
+
+#[derive(Clone, Copy)]
+enum AlignmentStep {
+    Match {
+        canonical_slot_index: usize,
+        mission_input_index: usize,
+    },
+    ExistingGap {
+        canonical_slot_index: usize,
+    },
+    Insert {
+        mission_input_index: usize,
+    },
+}
+
+#[derive(Clone, Copy)]
+enum AlignmentTransition {
+    Match,
+    ExistingGap,
+    Insert,
+}
+
+#[derive(Clone, Copy)]
+struct AlignmentBackpointer {
+    prev_i: usize,
+    prev_j: usize,
+    transition: AlignmentTransition,
+}
+
+#[derive(Clone, Copy)]
+struct AlignmentCell {
+    score: i32,
+    paths: u8,
+    backpointer: Option<AlignmentBackpointer>,
+}
+
+impl AlignmentCell {
+    fn unreachable() -> Self {
+        Self {
+            score: i32::MIN,
+            paths: 0,
+            backpointer: None,
+        }
+    }
+}
+
+fn collect_mission_task_inputs(
+    graph: &CuGraph,
+    node_id: NodeId,
+    task_id: &str,
+) -> CuResult<Vec<MissionTaskInput>> {
+    let mut edge_ids = graph.get_dst_edges(node_id)?;
+    edge_ids.sort_by_key(|edge_id| {
+        graph
+            .edge(*edge_id)
+            .map(|edge| edge.order)
+            .unwrap_or(usize::MAX)
+    });
+
+    edge_ids
+        .into_iter()
+        .map(|edge_id| {
+            let edge = graph.edge(edge_id).ok_or_else(|| {
+                CuError::from(format!(
+                    "Missing edge {edge_id} while collecting inputs for task '{task_id}'"
+                ))
+            })?;
+            Ok(MissionTaskInput {
+                msg_type: edge.msg.clone(),
+                connection_order: edge.order,
+            })
+        })
+        .collect()
+}
+
+fn format_canonical_input_slots(slots: &[CanonicalTaskInputSlot]) -> String {
+    let parts: Vec<String> = slots
+        .iter()
+        .map(|slot| {
+            let orders = slot
+                .connection_orders
+                .iter()
+                .map(|order| order.to_string())
+                .collect::<Vec<_>>()
+                .join("|");
+            format!("{}@{}", slot.msg_type, orders)
+        })
+        .collect();
+    format!("[{}]", parts.join(", "))
+}
+
+fn format_mission_task_inputs(inputs: &[MissionTaskInput]) -> String {
+    let parts: Vec<String> = inputs
+        .iter()
+        .map(|input| format!("{}@{}", input.msg_type, input.connection_order))
+        .collect();
+    format!("[{}]", parts.join(", "))
+}
+
+const INPUT_MATCH_SCORE: i32 = 100;
+const ANCHORED_INPUT_MATCH_BONUS: i32 = 1;
+
+fn task_input_match_score(slot: &CanonicalTaskInputSlot, input: &MissionTaskInput) -> Option<i32> {
+    if slot.msg_type != input.msg_type {
+        return None;
+    }
+
+    let anchored_bonus = if slot.connection_orders.contains(&input.connection_order) {
+        ANCHORED_INPUT_MATCH_BONUS
+    } else {
+        0
+    };
+
+    Some(INPUT_MATCH_SCORE + anchored_bonus)
+}
+
+fn update_alignment_cell(
+    cell: &mut AlignmentCell,
+    candidate_score: i32,
+    candidate_paths: u8,
+    backpointer: Option<AlignmentBackpointer>,
+) {
+    if candidate_paths == 0 {
+        return;
+    }
+
+    if candidate_score > cell.score {
+        cell.score = candidate_score;
+        cell.paths = candidate_paths.min(2);
+        cell.backpointer = if candidate_paths == 1 {
+            backpointer
+        } else {
+            None
+        };
+    } else if candidate_score == cell.score {
+        cell.paths = cell.paths.saturating_add(candidate_paths).min(2);
+        cell.backpointer = None;
+    }
+}
+
+fn align_task_inputs(
+    task_id: &str,
+    mission_name: &str,
+    canonical_slots: &[CanonicalTaskInputSlot],
+    mission_inputs: &[MissionTaskInput],
+) -> CuResult<Vec<AlignmentStep>> {
+    let canonical_len = canonical_slots.len();
+    let mission_len = mission_inputs.len();
+    let mut table = vec![vec![AlignmentCell::unreachable(); mission_len + 1]; canonical_len + 1];
+    table[0][0] = AlignmentCell {
+        score: 0,
+        paths: 1,
+        backpointer: None,
+    };
+
+    for i in 0..=canonical_len {
+        for j in 0..=mission_len {
+            let cell = table[i][j];
+            if cell.paths == 0 {
+                continue;
+            }
+
+            if i < canonical_len {
+                update_alignment_cell(
+                    &mut table[i + 1][j],
+                    cell.score,
+                    cell.paths,
+                    if cell.paths == 1 {
+                        Some(AlignmentBackpointer {
+                            prev_i: i,
+                            prev_j: j,
+                            transition: AlignmentTransition::ExistingGap,
+                        })
+                    } else {
+                        None
+                    },
+                );
+            }
+
+            if j < mission_len {
+                update_alignment_cell(
+                    &mut table[i][j + 1],
+                    cell.score,
+                    cell.paths,
+                    if cell.paths == 1 {
+                        Some(AlignmentBackpointer {
+                            prev_i: i,
+                            prev_j: j,
+                            transition: AlignmentTransition::Insert,
+                        })
+                    } else {
+                        None
+                    },
+                );
+            }
+
+            if i < canonical_len
+                && j < mission_len
+                && let Some(match_score) =
+                    task_input_match_score(&canonical_slots[i], &mission_inputs[j])
+            {
+                update_alignment_cell(
+                    &mut table[i + 1][j + 1],
+                    cell.score + match_score,
+                    cell.paths,
+                    if cell.paths == 1 {
+                        Some(AlignmentBackpointer {
+                            prev_i: i,
+                            prev_j: j,
+                            transition: AlignmentTransition::Match,
+                        })
+                    } else {
+                        None
+                    },
+                );
+            }
+        }
+    }
+
+    let final_cell = table[canonical_len][mission_len];
+    if final_cell.paths > 1 {
+        return Err(CuError::from(format!(
+            "Task '{task_id}' has ambiguous input alignment while merging mission '{mission_name}'. Existing canonical inputs {} and mission inputs {} admit multiple equally valid alignments.",
+            format_canonical_input_slots(canonical_slots),
+            format_mission_task_inputs(mission_inputs),
+        )));
+    }
+
+    let mut steps = Vec::new();
+    let (mut i, mut j) = (canonical_len, mission_len);
+    while i > 0 || j > 0 {
+        let backpointer = table[i][j].backpointer.unwrap_or_else(|| {
+            panic!(
+                "Missing backpointer while aligning task '{task_id}' for mission '{mission_name}'"
+            )
+        });
+
+        match backpointer.transition {
+            AlignmentTransition::Match => steps.push(AlignmentStep::Match {
+                canonical_slot_index: i - 1,
+                mission_input_index: j - 1,
+            }),
+            AlignmentTransition::ExistingGap => steps.push(AlignmentStep::ExistingGap {
+                canonical_slot_index: i - 1,
+            }),
+            AlignmentTransition::Insert => steps.push(AlignmentStep::Insert {
+                mission_input_index: j - 1,
+            }),
+        }
+
+        i = backpointer.prev_i;
+        j = backpointer.prev_j;
+    }
+    steps.reverse();
+    Ok(steps)
+}
+
+fn merge_task_input_layout(
+    task_id: &str,
+    layout: &mut TaskInputLayout,
+    mission_name: String,
+    mission_inputs: Vec<MissionTaskInput>,
+) -> CuResult<()> {
+    let alignment = align_task_inputs(task_id, &mission_name, &layout.slots, &mission_inputs)?;
+    let mut new_slots = Vec::with_capacity(alignment.len());
+    let mut old_to_new = vec![None; layout.slots.len()];
+    let mut mission_mapping = Vec::with_capacity(alignment.len());
+
+    for step in alignment {
+        match step {
+            AlignmentStep::Match {
+                canonical_slot_index,
+                mission_input_index,
+            } => {
+                let mut slot = layout.slots[canonical_slot_index].clone();
+                slot.connection_orders
+                    .insert(mission_inputs[mission_input_index].connection_order);
+                let new_index = new_slots.len();
+                old_to_new[canonical_slot_index] = Some(new_index);
+                new_slots.push(slot);
+                mission_mapping.push(Some(mission_input_index));
+            }
+            AlignmentStep::ExistingGap {
+                canonical_slot_index,
+            } => {
+                let new_index = new_slots.len();
+                old_to_new[canonical_slot_index] = Some(new_index);
+                new_slots.push(layout.slots[canonical_slot_index].clone());
+                mission_mapping.push(None);
+            }
+            AlignmentStep::Insert {
+                mission_input_index,
+            } => {
+                new_slots.push(CanonicalTaskInputSlot {
+                    msg_type: mission_inputs[mission_input_index].msg_type.clone(),
+                    connection_orders: BTreeSet::from([
+                        mission_inputs[mission_input_index].connection_order
+                    ]),
+                });
+                mission_mapping.push(Some(mission_input_index));
+            }
+        }
+    }
+
+    let mut remapped_mission_slot_mappings =
+        HashMap::with_capacity(layout.mission_slot_mappings.len() + 1);
+    for (existing_mission, existing_mapping) in &layout.mission_slot_mappings {
+        let mut remapped = vec![None; new_slots.len()];
+        for (old_slot_index, maybe_local_input_index) in existing_mapping.iter().enumerate() {
+            let new_slot_index = old_to_new[old_slot_index].unwrap_or_else(|| {
+                panic!("Missing remap for task '{task_id}' canonical slot {old_slot_index}")
+            });
+            remapped[new_slot_index] = *maybe_local_input_index;
+        }
+        remapped_mission_slot_mappings.insert(existing_mission.clone(), remapped);
+    }
+    remapped_mission_slot_mappings.insert(mission_name, mission_mapping);
+
+    layout.slots = new_slots;
+    layout.mission_slot_mappings = remapped_mission_slot_mappings;
+    Ok(())
+}
+
+fn collect_task_input_layouts(
+    all_missions: &[(String, CuGraph)],
+) -> CuResult<HashMap<String, TaskInputLayout>> {
+    let mut task_mission_inputs: BTreeMap<String, Vec<(String, Vec<MissionTaskInput>)>> =
+        BTreeMap::new();
+
+    for (mission_name, graph) in all_missions {
+        for (node_id, node) in graph.get_all_nodes() {
+            if node.get_flavor() != Flavor::Task {
+                continue;
+            }
+
+            if find_task_type_for_id(graph, node_id)? == CuTaskType::Source {
+                continue;
+            }
+
+            let task_id = node.get_id().to_string();
+            let mission_inputs = collect_mission_task_inputs(graph, node_id, task_id.as_str())?;
+            task_mission_inputs
+                .entry(task_id)
+                .or_default()
+                .push((mission_name.clone(), mission_inputs));
+        }
+    }
+
+    let mut layouts = HashMap::new();
+    for (task_id, mission_inputs) in task_mission_inputs {
+        let mut mission_iter = mission_inputs.into_iter();
+        let Some((first_mission, first_inputs)) = mission_iter.next() else {
+            continue;
+        };
+
+        let slots: Vec<CanonicalTaskInputSlot> = first_inputs
+            .iter()
+            .map(|input| CanonicalTaskInputSlot {
+                msg_type: input.msg_type.clone(),
+                connection_orders: BTreeSet::from([input.connection_order]),
+            })
+            .collect();
+        let mut mission_slot_mappings = HashMap::new();
+        mission_slot_mappings.insert(
+            first_mission,
+            (0..first_inputs.len()).map(Some).collect::<Vec<_>>(),
+        );
+
+        let mut layout = TaskInputLayout {
+            slots,
+            mission_slot_mappings,
+        };
+        for (mission_name, mission_inputs) in mission_iter {
+            merge_task_input_layout(&task_id, &mut layout, mission_name, mission_inputs)?;
+        }
+
+        layouts.insert(task_id, layout);
+    }
+
+    Ok(layouts)
+}
+
+struct GeneratedTaskInput {
+    setup: proc_macro2::TokenStream,
+    expr: proc_macro2::TokenStream,
+}
+
+fn present_task_input_expr(
+    input: &cu29_runtime::curuntime::CuInputMsg,
+    output_pack_sizes: &[usize],
+) -> proc_macro2::TokenStream {
+    let input_index = int2sliceindex(input.culist_index);
+    let output_size = output_pack_sizes
+        .get(input.culist_index as usize)
+        .copied()
+        .unwrap_or_else(|| {
+            panic!(
+                "Missing output pack size for culist index {}",
+                input.culist_index
+            )
+        });
+    if output_size > 1 {
+        let port_index = syn::Index::from(input.src_port);
+        quote! { &msgs.#input_index.#port_index }
+    } else {
+        quote! { &msgs.#input_index }
+    }
+}
+
+fn generate_task_input_binding(
+    step: &CuExecutionStep,
+    mission_name: &str,
+    output_pack_sizes: &[usize],
+    task_input_layouts: &HashMap<String, TaskInputLayout>,
+) -> GeneratedTaskInput {
+    let task_id = step.node.get_id().to_string();
+    let layout = task_input_layouts
+        .get(&task_id)
+        .unwrap_or_else(|| panic!("Missing canonical input layout for task '{task_id}'"));
+    let slot_mapping = layout
+        .mission_slot_mappings
+        .get(mission_name)
+        .unwrap_or_else(|| {
+            panic!("Missing input slot mapping for task '{task_id}' in mission '{mission_name}'")
+        });
+
+    let mut setup = Vec::new();
+    let mut refs = Vec::new();
+
+    for (slot_index, slot) in layout.slots.iter().enumerate() {
+        if let Some(input_index) = slot_mapping.get(slot_index).copied().flatten() {
+            let input = step.input_msg_indices_types.get(input_index).unwrap_or_else(|| {
+                panic!(
+                    "Task '{task_id}' mission '{mission_name}' input slot {slot_index} mapped to missing input index {input_index}"
+                )
+            });
+            refs.push(present_task_input_expr(input, output_pack_sizes));
+            continue;
+        }
+
+        let empty_input_ident = format_ident!("__cu_missing_input_{slot_index}");
+        let input_ty: Type = parse_str(slot.msg_type.as_str()).unwrap_or_else(|err| {
+            panic!(
+                "Could not parse canonical input message type '{}' for task '{}': {err}",
+                slot.msg_type, task_id
+            )
+        });
+        setup.push(quote! {
+            let #empty_input_ident = cu29::cutask::CuMsg::<#input_ty>::new(None);
+        });
+        refs.push(quote! { &#empty_input_ident });
+    }
+
+    let expr = match refs.len() {
+        0 => quote! { &() },
+        1 => refs
+            .into_iter()
+            .next()
+            .expect("single input expression missing"),
+        _ => quote! { &( #(#refs),* ) },
+    };
+
+    GeneratedTaskInput {
+        setup: quote! { #(#setup)* },
+        expr,
+    }
 }
 
 /// Builds the tuple of the CuList as a tuple off all the output slots.
@@ -7058,6 +7572,8 @@ fn parallel_bridge_lifecycle_tokens(
 #[derive(Clone, Copy)]
 struct StepGenerationContext<'a> {
     output_pack_sizes: &'a [usize],
+    task_input_layouts: &'a HashMap<String, TaskInputLayout>,
+    mission_name: &'a str,
     sim_mode: bool,
     mission_mod: &'a Ident,
     lifecycle_placement: ParallelLifecyclePlacement,
@@ -7067,6 +7583,8 @@ struct StepGenerationContext<'a> {
 impl<'a> StepGenerationContext<'a> {
     fn new(
         output_pack_sizes: &'a [usize],
+        task_input_layouts: &'a HashMap<String, TaskInputLayout>,
+        mission_name: &'a str,
         sim_mode: bool,
         mission_mod: &'a Ident,
         lifecycle_placement: ParallelLifecyclePlacement,
@@ -7074,6 +7592,8 @@ impl<'a> StepGenerationContext<'a> {
     ) -> Self {
         Self {
             output_pack_sizes,
+            task_input_layouts,
+            mission_name,
             sim_mode,
             mission_mod,
             lifecycle_placement,
@@ -7102,6 +7622,8 @@ fn generate_task_execution_tokens(
 ) -> (proc_macro2::TokenStream, proc_macro2::TokenStream) {
     let StepGenerationContext {
         output_pack_sizes,
+        task_input_layouts,
+        mission_name,
         sim_mode,
         mission_mod,
         lifecycle_placement,
@@ -7326,34 +7848,15 @@ fn generate_task_execution_tokens(
             )
         }
         CuTaskType::Sink => {
-            let input_exprs: Vec<proc_macro2::TokenStream> = step
-                .input_msg_indices_types
-                .iter()
-                .map(|input| {
-                    let input_index = int2sliceindex(input.culist_index);
-                    let output_size = output_pack_sizes
-                        .get(input.culist_index as usize)
-                        .copied()
-                        .unwrap_or_else(|| {
-                            panic!(
-                                "Missing output pack size for culist index {}",
-                                input.culist_index
-                            )
-                        });
-                    if output_size > 1 {
-                        let port_index = syn::Index::from(input.src_port);
-                        quote! { msgs.#input_index.#port_index }
-                    } else {
-                        quote! { msgs.#input_index }
-                    }
-                })
-                .collect();
-            let inputs_type = if input_exprs.len() == 1 {
-                let input = input_exprs.first().unwrap();
-                quote! { #input }
-            } else {
-                quote! { (#(&#input_exprs),*) }
-            };
+            let GeneratedTaskInput {
+                setup: task_input_setup,
+                expr: task_input_expr,
+            } = generate_task_input_binding(
+                step,
+                mission_name,
+                output_pack_sizes,
+                task_input_layouts,
+            );
 
             let monitoring_action = quote! {
                 debug!("Component {}: Error during process: {}", #mission_mod::monitor_component_label(cu29::monitoring::ComponentId::new(#tid)), &error);
@@ -7381,7 +7884,7 @@ fn generate_task_execution_tokens(
             let call_sim_callback = if sim_mode {
                 quote! {
                     let doit = {
-                        let cumsg_input = &#inputs_type;
+                        let cumsg_input = #task_input_expr;
                         let cumsg_output = &mut msgs.#output_culist_index;
                         let state = CuTaskCallbackState::Process(cumsg_input, cumsg_output);
                         let ovr = sim_callback(SimStep::#enum_name(state));
@@ -7407,8 +7910,9 @@ fn generate_task_execution_tokens(
                         #parallel_task_preprocess
                         #comment_tokens
                         kf_manager.freeze_task(clid, &#task_instance)?;
+                        #task_input_setup
                         #call_sim_callback
-                        let cumsg_input = &#inputs_type;
+                        let cumsg_input = #task_input_expr;
                         let cumsg_output = &mut msgs.#output_culist_index;
                         let maybe_error = if doit {
                             execution_probe.record(cu29::monitoring::ExecutionMarker {
@@ -7437,34 +7941,15 @@ fn generate_task_execution_tokens(
             )
         }
         CuTaskType::Regular => {
-            let input_exprs: Vec<proc_macro2::TokenStream> = step
-                .input_msg_indices_types
-                .iter()
-                .map(|input| {
-                    let input_index = int2sliceindex(input.culist_index);
-                    let output_size = output_pack_sizes
-                        .get(input.culist_index as usize)
-                        .copied()
-                        .unwrap_or_else(|| {
-                            panic!(
-                                "Missing output pack size for culist index {}",
-                                input.culist_index
-                            )
-                        });
-                    if output_size > 1 {
-                        let port_index = syn::Index::from(input.src_port);
-                        quote! { msgs.#input_index.#port_index }
-                    } else {
-                        quote! { msgs.#input_index }
-                    }
-                })
-                .collect();
-            let inputs_type = if input_exprs.len() == 1 {
-                let input = input_exprs.first().unwrap();
-                quote! { #input }
-            } else {
-                quote! { (#(&#input_exprs),*) }
-            };
+            let GeneratedTaskInput {
+                setup: task_input_setup,
+                expr: task_input_expr,
+            } = generate_task_input_binding(
+                step,
+                mission_name,
+                output_pack_sizes,
+                task_input_layouts,
+            );
 
             let monitoring_action = quote! {
                 debug!("Component {}: Error during process: {}", #mission_mod::monitor_component_label(cu29::monitoring::ComponentId::new(#tid)), &error);
@@ -7492,7 +7977,7 @@ fn generate_task_execution_tokens(
             let call_sim_callback = if sim_mode {
                 quote! {
                     let doit = {
-                        let cumsg_input = &#inputs_type;
+                        let cumsg_input = #task_input_expr;
                         let cumsg_output = &mut msgs.#output_culist_index;
                         let state = CuTaskCallbackState::Process(cumsg_input, cumsg_output);
                         let ovr = sim_callback(SimStep::#enum_name(state));
@@ -7563,8 +8048,9 @@ fn generate_task_execution_tokens(
                         #parallel_task_preprocess
                         #comment_tokens
                         kf_manager.freeze_task(clid, &#task_instance)?;
+                        #task_input_setup
                         #call_sim_callback
-                        let cumsg_input = &#inputs_type;
+                        let cumsg_input = #task_input_expr;
                         let cumsg_output = &mut msgs.#output_culist_index;
                         let maybe_error = if doit {
                             execution_probe.record(cu29::monitoring::ExecutionMarker {
@@ -7597,6 +8083,8 @@ fn generate_bridge_rx_execution_tokens(
 ) -> (proc_macro2::TokenStream, proc_macro2::TokenStream) {
     let StepGenerationContext {
         output_pack_sizes: _,
+        task_input_layouts: _,
+        mission_name: _,
         sim_mode,
         mission_mod,
         lifecycle_placement,
@@ -7740,6 +8228,8 @@ fn generate_bridge_tx_execution_tokens(
 ) -> (proc_macro2::TokenStream, proc_macro2::TokenStream) {
     let StepGenerationContext {
         output_pack_sizes,
+        task_input_layouts: _,
+        mission_name: _,
         sim_mode,
         mission_mod,
         lifecycle_placement,
